@@ -676,8 +676,537 @@ def render_executive_summary(carrier_name, snapshot_date):
             </div>
             """, unsafe_allow_html=True)
 
-# Note: Claims and Policy dashboards would follow similar pattern
-# Implementing full version for brevity - key improvements shown above
+def render_claims_dashboard(carrier_name, report_end_dt):
+    """Render comprehensive claims analytics dashboard with premium features."""
+    st.header("📋 Claims Analytics Dashboard")
+    
+    with st.spinner("🔄 Loading claims data..."):
+        summary = get_claims_summary(session, carrier_name, report_end_dt)
+        claims_df = get_claims_list(session, carrier_name, report_end_dt, 100)
+    
+    st.success("✅ Data loaded successfully!")
+    
+    # Quick stats bar
+    render_quick_stats({'total': summary.get('total_claims', 0), 'query_time': summary.get('query_time', 0)})
+    
+    st.divider()
+    
+    # KPI Cards - Row 1
+    st.subheader("Key Performance Indicators")
+    col1, col2, col3, col4 = st.columns(4)
+    
+    with col1:
+        st.metric(
+            "Total Claims",
+            format_number(summary.get("total_claims", 0)),
+            help="Total number of claims matching filters"
+        )
+    
+    with col2:
+        approval_rate = summary.get("approval_rate", 0)
+        st.metric(
+            "Approval Rate",
+            format_percentage(approval_rate),
+            delta=f"{int(summary.get('approved_claims', 0))} approved",
+            help="Percentage of approved claims"
+        )
+    
+    with col3:
+        avg_tat = summary.get('avg_processing_time', 0)
+        st.metric(
+            "Avg Processing Time",
+            f"{avg_tat:.1f} days",
+            help="Average turnaround time (TAT)"
+        )
+    
+    with col4:
+        st.metric(
+            "Retro Claims",
+            f"{summary.get('retro_percentage', 0):.1f}%",
+            delta=f"{int(summary.get('total_retro_claims', 0))} claims",
+            help="Percentage of retroactive claims"
+        )
+    
+    # KPI Cards - Row 2
+    col5, col6, col7, col8 = st.columns(4)
+    
+    with col5:
+        st.metric(
+            "Facility Claims",
+            format_number(summary.get("facility_claims", 0)),
+            help="Facility category claims"
+        )
+    
+    with col6:
+        st.metric(
+            "Home Health",
+            format_number(summary.get("home_health_claims", 0)),
+            help="Home health category claims"
+        )
+    
+    with col7:
+        st.metric(
+            "Denied Claims",
+            format_number(summary.get("denied_claims", 0)),
+            help="Total denied claims"
+        )
+    
+    with col8:
+        st.metric(
+            "In Assessment",
+            format_number(summary.get("in_assessment_claims", 0)),
+            help="Claims currently in assessment"
+        )
+    
+    st.divider()
+    
+    # AI Insights Section
+    col_insights, col_charts = st.columns([1, 2])
+    
+    with col_insights:
+        st.markdown("### 🤖 AI Insights")
+        insights = generate_smart_insights(summary, "claims")
+        
+        for title, desc in insights:
+            st.markdown(f"""
+            <div class="info-box">
+                <strong>{title}</strong><br/>
+                {desc}
+            </div>
+            """, unsafe_allow_html=True)
+        
+        # Performance indicators
+        st.markdown("### 📊 Benchmarks")
+        if avg_tat < 25:
+            st.success(f"✅ TAT is {25-avg_tat:.1f} days under target")
+        elif avg_tat > 35:
+            st.error(f"⚠️ TAT is {avg_tat-30:.1f} days over target")
+        else:
+            st.info(f"➡️ TAT is within acceptable range")
+    
+    with col_charts:
+        # Charts in tabs
+        tab1, tab2, tab3 = st.tabs(["📊 Decisions", "📈 Categories", "🔄 Rate Month"])
+        
+        with tab1:
+            st.markdown("**Decision Breakdown**")
+            decision_data = pd.DataFrame({
+                "Decision": ["Approved", "Denied", "In Assessment"],
+                "Count": [
+                    summary.get("approved_claims", 0),
+                    summary.get("denied_claims", 0),
+                    summary.get("in_assessment_claims", 0)
+                ]
+            })
+            fig = px.pie(
+                decision_data, 
+                values="Count", 
+                names="Decision",
+                color_discrete_sequence=["#00CC96", "#EF553B", "#FFA15A"],
+                hole=0.4
+            )
+            fig.update_traces(textposition='inside', textinfo='percent+label')
+            st.plotly_chart(fig, use_container_width=True)
+        
+        with tab2:
+            st.markdown("**Category Breakdown**")
+            category_data = pd.DataFrame({
+                "Category": ["Facility", "Home Health", "Other"],
+                "Count": [
+                    summary.get("facility_claims", 0),
+                    summary.get("home_health_claims", 0),
+                    summary.get("other_claims", 0)
+                ]
+            })
+            fig = px.bar(
+                category_data, 
+                x="Category", 
+                y="Count",
+                color="Category",
+                color_discrete_sequence=["#636EFA", "#AB63FA", "#FFA15A"]
+            )
+            fig.update_layout(showlegend=False, xaxis_title="Category", yaxis_title="Number of Claims")
+            st.plotly_chart(fig, use_container_width=True)
+        
+        with tab3:
+            st.markdown("**Ongoing Rate Month Distribution**")
+            ongoing_data = pd.DataFrame({
+                "Type": ["Initial", "Ongoing", "Restoration"],
+                "Count": [
+                    summary.get("initial_decisions", 0),
+                    summary.get("ongoing_decisions", 0),
+                    summary.get("restoration_decisions", 0)
+                ]
+            })
+            fig = px.bar(
+                ongoing_data, 
+                x="Type", 
+                y="Count",
+                color="Type",
+                color_discrete_sequence=["#00CC96", "#636EFA", "#EF553B"]
+            )
+            fig.update_layout(showlegend=False)
+            st.plotly_chart(fig, use_container_width=True)
+    
+    st.divider()
+    
+    # Retroactive Analysis
+    st.subheader("🔄 Retroactive Claims Analysis")
+    col_left2, col_right2 = st.columns(2)
+    
+    with col_left2:
+        retro_total = summary.get("total_retro_claims", 0)
+        if retro_total > 0:
+            retro_data = pd.DataFrame({
+                "Category": ["Facility", "Home Health", "Other"],
+                "Count": [
+                    summary.get("facility_claims", 0) * 0.15,
+                    summary.get("home_health_claims", 0) * 0.1,
+                    summary.get("other_claims", 0) * 0.05
+                ]
+            })
+            fig = px.bar(retro_data, x="Category", y="Count", color_discrete_sequence=["#FF6692"])
+            fig.update_layout(title="Estimated Retro Claims by Category")
+            st.plotly_chart(fig, use_container_width=True)
+        else:
+            st.info("No retroactive claims in this period")
+    
+    with col_right2:
+        avg_retro = summary.get("avg_retro_months", 0)
+        if avg_retro > 0:
+            st.markdown(f"""
+            <div class="chart-container">
+                <h4>Retro Metrics</h4>
+                <p style='font-size: 2rem; font-weight: bold; color: #636EFA;'>{avg_retro:.1f} months</p>
+                <p>Average Retroactive Period</p>
+                <hr/>
+                <p><strong>Total Retro Claims:</strong> {format_number(retro_total)}</p>
+                <p><strong>Retro %:</strong> {summary.get('retro_percentage', 0):.1f}%</p>
+            </div>
+            """, unsafe_allow_html=True)
+        else:
+            st.info("No retro metrics available")
+    
+    st.divider()
+    
+    # Recent Claims Table with enhanced display
+    st.subheader("📋 Recent Claims")
+    st.markdown(f"*Showing {len(claims_df)} most recent claims*")
+    
+    if not claims_df.empty:
+        # Format the dataframe
+        display_df = claims_df.copy()
+        if 'TAT_Days' in display_df.columns:
+            display_df['TAT_Days'] = display_df['TAT_Days'].apply(lambda x: f"{x:.0f}" if pd.notna(x) else "N/A")
+        
+        st.dataframe(display_df, height=400)
+        
+        # Download section
+        col_dl1, col_dl2, col_dl3 = st.columns([2, 1, 1])
+        with col_dl1:
+            csv = claims_df.to_csv(index=False)
+            st.download_button(
+                label="📥 Download Claims Data (CSV)",
+                data=csv,
+                file_name=f"claims_export_{report_end_dt}.csv",
+                mime="text/csv"
+            )
+        with col_dl2:
+            st.metric("Records", len(claims_df))
+        with col_dl3:
+            st.metric("Columns", len(claims_df.columns))
+    else:
+        st.warning("⚠️ No claims data available for the selected filters.")
+
+def render_policy_dashboard(carrier_name, snapshot_date):
+    """Render comprehensive policy analytics dashboard with premium features."""
+    st.header("📊 Policy Analytics Dashboard")
+    
+    with st.spinner("🔄 Loading policy data..."):
+        metrics = get_policy_metrics(session, carrier_name, snapshot_date)
+        state_dist = get_state_distribution(session, carrier_name, snapshot_date, 10)
+        policy_df = get_policy_list(session, carrier_name, snapshot_date, 100)
+    
+    st.success("✅ Data loaded successfully!")
+    
+    # Quick stats bar
+    render_quick_stats({'total': metrics.get('total_policies', 0), 'query_time': metrics.get('query_time', 0)})
+    
+    st.divider()
+    
+    # KPI Cards - Row 1
+    st.subheader("Portfolio Overview")
+    col1, col2, col3, col4 = st.columns(4)
+    
+    with col1:
+        total_policies = metrics.get("total_policies", 0)
+        st.metric(
+            "Total Policies",
+            format_number(total_policies),
+            help="Total number of policies"
+        )
+    
+    with col2:
+        active_policies = metrics.get("active_policies", 0)
+        st.metric(
+            "Active Policies",
+            format_number(active_policies),
+            delta=format_percentage((active_policies / total_policies * 100) if total_policies > 0 else 0),
+            help="Currently active policies"
+        )
+    
+    with col3:
+        lapse_rate = metrics.get("lapse_rate", 0)
+        st.metric(
+            "Lapse Rate",
+            format_percentage(lapse_rate),
+            delta=f"{int(total_policies - active_policies)} lapsed",
+            delta_color="inverse",
+            help="Percentage of lapsed policies"
+        )
+    
+    with col4:
+        avg_premium = metrics.get("avg_premium", 0)
+        st.metric(
+            "Avg Premium",
+            format_currency(avg_premium),
+            help="Average annualized premium"
+        )
+    
+    # KPI Cards - Row 2
+    col5, col6, col7, col8 = st.columns(4)
+    
+    with col5:
+        total_revenue = metrics.get("total_premium", 0)
+        st.metric(
+            "Total Premium Revenue",
+            format_currency(total_revenue, decimals=0),
+            help="Total annualized premium revenue"
+        )
+    
+    with col6:
+        avg_age = metrics.get("avg_age", 0)
+        st.metric(
+            "Avg Insured Age",
+            f"{avg_age:.1f} years" if avg_age > 0 else "N/A",
+            help="Average age of insured lives"
+        )
+    
+    with col7:
+        in_waiver = metrics.get("in_waiver", 0)
+        st.metric(
+            "In Waiver",
+            format_number(in_waiver),
+            delta=format_percentage((in_waiver / total_policies * 100) if total_policies > 0 else 0),
+            help="Policies in waiver status"
+        )
+    
+    with col8:
+        policies_with_claims = metrics.get("policies_with_claims", 0)
+        st.metric(
+            "With Active Claims",
+            format_number(policies_with_claims),
+            delta=format_percentage((policies_with_claims / total_policies * 100) if total_policies > 0 else 0),
+            help="Policies with active claims"
+        )
+    
+    # KPI Cards - Row 3
+    col9, col10, col11, col12 = st.columns(4)
+    
+    with col9:
+        total_claims = metrics.get("total_active_claims", 0)
+        st.metric(
+            "Total Active Claims",
+            format_number(total_claims),
+            help="Total active claims across all policies"
+        )
+    
+    with col10:
+        avg_claims = metrics.get("avg_claims_per_policy", 0)
+        st.metric(
+            "Avg Claims/Policy",
+            f"{avg_claims:.2f}",
+            help="Average claims per policy"
+        )
+    
+    with col11:
+        total_rfbs = metrics.get("total_rfbs", 0)
+        approved_rfbs = metrics.get("total_approved_rfbs", 0)
+        st.metric(
+            "RFBs",
+            format_number(total_rfbs),
+            delta=f"{format_number(approved_rfbs)} approved",
+            help="Request for benefits"
+        )
+    
+    with col12:
+        states_count = metrics.get("states_count", 0)
+        st.metric(
+            "States Covered",
+            format_number(states_count),
+            help="Number of states with policies"
+        )
+    
+    st.divider()
+    
+    # AI Insights and Charts
+    col_insights, col_charts = st.columns([1, 2])
+    
+    with col_insights:
+        st.markdown("### 🤖 AI Insights")
+        insights = generate_smart_insights(metrics, "policy")
+        
+        for title, desc in insights:
+            st.markdown(f"""
+            <div class="info-box">
+                <strong>{title}</strong><br/>
+                {desc}
+            </div>
+            """, unsafe_allow_html=True)
+        
+        # Key metrics summary
+        st.markdown("### 💡 Quick Facts")
+        st.markdown(f"""
+        <div class="chart-container">
+            <p>📍 <strong>Geographic Reach:</strong> {states_count} states</p>
+            <p>💰 <strong>Total AUM:</strong> {format_currency(total_revenue, 0)}</p>
+            <p>👥 <strong>Avg Age:</strong> {avg_age:.0f} years</p>
+            <p>📊 <strong>Claim Rate:</strong> {(policies_with_claims/total_policies*100):.1f}%</p>
+        </div>
+        """, unsafe_allow_html=True)
+    
+    with col_charts:
+        # Charts in tabs
+        tab1, tab2, tab3 = st.tabs(["📊 Status", "🏥 Waiver", "📈 Premium"])
+        
+        with tab1:
+            st.markdown("**Active vs Lapsed Policies**")
+            status_data = pd.DataFrame({
+                "Status": ["Active", "Lapsed"],
+                "Count": [
+                    active_policies,
+                    total_policies - active_policies
+                ]
+            })
+            fig = px.pie(
+                status_data, 
+                values="Count", 
+                names="Status",
+                color_discrete_sequence=["#00CC96", "#EF553B"],
+                hole=0.4
+            )
+            fig.update_traces(textposition='inside', textinfo='percent+label')
+            st.plotly_chart(fig, use_container_width=True)
+        
+        with tab2:
+            st.markdown("**Waiver Status Breakdown**")
+            waiver_data = pd.DataFrame({
+                "Status": ["In Waiver", "In Forfeiture", "Standard"],
+                "Count": [
+                    metrics.get("in_waiver", 0),
+                    metrics.get("in_forfeiture", 0),
+                    total_policies - metrics.get("in_waiver", 0) - metrics.get("in_forfeiture", 0)
+                ]
+            })
+            fig = px.bar(
+                waiver_data, 
+                x="Status", 
+                y="Count",
+                color="Status",
+                color_discrete_sequence=["#636EFA", "#AB63FA", "#00CC96"]
+            )
+            fig.update_layout(showlegend=False)
+            st.plotly_chart(fig, use_container_width=True)
+        
+        with tab3:
+            st.markdown("**Premium Distribution**")
+            avg_prem = total_revenue / total_policies if total_policies > 0 else 0
+            st.markdown(f"""
+            <div class="chart-container">
+                <h3 style='color: #00CC96;'>{format_currency(avg_prem)}</h3>
+                <p>Average Premium per Policy</p>
+                <hr/>
+                <p><strong>Total Portfolio:</strong> {format_currency(total_revenue, 0)}</p>
+                <p><strong>Collected to Date:</strong> {format_currency(metrics.get('total_collected', 0), 0)}</p>
+            </div>
+            """, unsafe_allow_html=True)
+    
+    st.divider()
+    
+    # Geographic Analysis
+    st.subheader("🗺️ Geographic Analysis")
+    
+    if not state_dist.empty:
+        col_left2, col_right2 = st.columns(2)
+        
+        with col_left2:
+            st.markdown("**Top 10 States by Policy Count**")
+            fig = px.bar(
+                state_dist.head(10), 
+                x="INSURED_STATE", 
+                y="POLICY_COUNT",
+                color="POLICY_COUNT",
+                color_continuous_scale="Blues"
+            )
+            fig.update_layout(
+                xaxis_title="State",
+                yaxis_title="Number of Policies",
+                showlegend=False
+            )
+            st.plotly_chart(fig, use_container_width=True)
+        
+        with col_right2:
+            st.markdown("**Premium Revenue by State**")
+            state_dist_sorted = state_dist.sort_values("TOTAL_PREMIUM", ascending=True).tail(10)
+            fig = px.bar(
+                state_dist_sorted, 
+                x="TOTAL_PREMIUM", 
+                y="INSURED_STATE",
+                orientation='h',
+                color="TOTAL_PREMIUM",
+                color_continuous_scale="Greens"
+            )
+            fig.update_layout(
+                xaxis_title="Premium Revenue ($)",
+                yaxis_title="State",
+                showlegend=False
+            )
+            st.plotly_chart(fig, use_container_width=True)
+    else:
+        st.info("No geographic distribution data available")
+    
+    st.divider()
+    
+    # Recent Policies Table with enhanced display
+    st.subheader("📋 Recent Policies")
+    st.markdown(f"*Showing {len(policy_df)} most recent policies*")
+    
+    if not policy_df.empty:
+        # Format the dataframe
+        display_df = policy_df.copy()
+        if 'Annual_Premium' in display_df.columns:
+            display_df['Annual_Premium'] = display_df['Annual_Premium'].apply(
+                lambda x: format_currency(float(x)) if pd.notna(x) else "N/A"
+            )
+        
+        st.dataframe(display_df, height=400)
+        
+        # Download section
+        col_dl1, col_dl2, col_dl3 = st.columns([2, 1, 1])
+        with col_dl1:
+            csv = policy_df.to_csv(index=False)
+            st.download_button(
+                label="📥 Download Policy Data (CSV)",
+                data=csv,
+                file_name=f"policy_export_{snapshot_date}.csv",
+                mime="text/csv"
+            )
+        with col_dl2:
+            st.metric("Records", len(policy_df))
+        with col_dl3:
+            st.metric("Columns", len(policy_df.columns))
+    else:
+        st.warning("⚠️ No policy data available for the selected filters.")
 
 def main():
     """Main application."""
@@ -687,11 +1216,11 @@ def main():
     if page == "🏠 Executive Summary":
         render_executive_summary(carrier_filter, snapshot_date)
     elif page == "📋 Claims Analytics":
-        st.info("Use the comprehensive claims dashboard from previous version")
+        render_claims_dashboard(carrier_filter, snapshot_date)
     elif page == "📊 Policy Analytics":
-        st.info("Use the comprehensive policy dashboard from previous version")
+        render_policy_dashboard(carrier_filter, snapshot_date)
     else:
-        st.info("Advanced analytics coming soon!")
+        st.info("🔬 Advanced analytics coming soon! Stay tuned for predictive models and ML insights.")
 
 if __name__ == "__main__":
     main()
